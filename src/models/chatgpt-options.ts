@@ -10,6 +10,8 @@ interface ChatGPTOptions {
 	price?: number;
 	max_conversation_tokens?: number;
 	endpoint?: string;
-}
+	functions?:[];
+	function_call?: string;
+} 
 
 export default ChatGPTOptions;

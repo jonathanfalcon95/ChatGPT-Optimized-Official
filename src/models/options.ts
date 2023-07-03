@@ -12,6 +12,8 @@ interface Options {
 	endpoint?: string;
 	price?: number;
 	max_conversation_tokens?: number;
+	functions?:[];
+	function_call?: string;
 }
 
 export default Options;

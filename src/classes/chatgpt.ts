@@ -9,6 +9,7 @@ import MessageType from "../enums/message-type.js";
 import AppDbContext from "./app-dbcontext.js";
 import OpenAIKey from "../models/openai-key.js";
 import { Configuration, OpenAIApi } from "openai";
+import { type } from "os";
 
 class ChatGPT {
 	public options: Options;
@@ -50,6 +51,8 @@ class ChatGPT {
 			max_conversation_tokens: options?.max_conversation_tokens || 4097,
 			endpoint: options?.endpoint || "https://api.openai.com/v1/chat/completions",
 			moderation: options?.moderation || false,
+			functions: options?.functions || [],
+			function_call: options?.function_call || "",
 		};
 	}
 
@@ -126,7 +129,8 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 	}
 
 	public resetConversation(conversationId: string) {
-		let conversation = this.db.conversations.Where((conversation) => conversation.id === conversationId).FirstOrDefault();
+		let conversation = this.db.conversations.Where((conversation) => conversation.id == conversationId).FirstOrDefault();
+		//console.log(conversation);
 		if (conversation) {
 			conversation.messages = [];
 			conversation.lastActive = Date.now();
@@ -137,8 +141,8 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 
 	public async ask(prompt: string, conversationId: string = "default", userName: string = "User") {
 		return await this.askStream(
-			(data) => {},
-			(data) => {},
+			(data) => { },
+			(data) => { },
 			prompt,
 			conversationId,
 			userName,
@@ -148,7 +152,6 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 	public async askStream(data: (arg0: string) => void, usage: (usage: Usage) => void, prompt: string, conversationId: string = "default", userName: string = "User") {
 		let oAIKey = this.getOpenAIKey();
 		let conversation = this.getConversation(conversationId, userName);
-
 		if (this.options.moderation) {
 			let flagged = await this.moderate(prompt, oAIKey.key);
 			if (flagged) {
@@ -161,6 +164,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 		}
 
 		let promptStr = this.generatePrompt(conversation, prompt);
+		console.log(promptStr);
 		let prompt_tokens = this.countTokens(promptStr);
 		try {
 			const response = await axios.post(
@@ -174,6 +178,8 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 					frequency_penalty: this.options.frequency_penalty,
 					presence_penalty: this.options.presence_penalty,
 					stream: true,
+					functions: this.options.functions,
+					function_call: this.options.function_call,
 				},
 				{
 					responseType: "stream",
@@ -184,17 +190,30 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 					},
 				},
 			);
-
+			// console.log("Stream message:",  response.data)
 			let responseStr = "";
-
+			let responseArg = "";
+			let responseNameFunction = "";
 			for await (const message of this.streamCompletion(response.data)) {
 				try {
 					const parsed = JSON.parse(message);
-					const { content } = parsed.choices[0].delta;
-					if (content) {
-						responseStr += content;
-						data(content);
+					const { delta, finish_reason } = parsed.choices[0];
+					const { content, function_call } = delta;
+
+					if (function_call) {
+						responseNameFunction += function_call.name;
+						responseArg += function_call.arguments;
+
 					}
+					//console.log("Stream message:", parsed.choices[0])
+					if (finish_reason === "function_call") {
+						responseStr = JSON.stringify({ "name": responseNameFunction, "arguments": responseArg });
+						data(responseStr);
+					} else
+						if (content) {
+							responseStr += content;
+							data(content);
+						}
 				} catch (error) {
 					console.error("Could not JSON parse stream message", message, error);
 				}
@@ -239,7 +258,84 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			}
 		}
 	}
+	public async askV1(prompt: string, conversationId: string = "default", userName: string = "User", type:number=1) {
+		return await this.askPost(
+			(data) => { },
+			(data) => { },
+			prompt,
+			conversationId,
+			userName,
+			type
+		);
+	}
+	public async askPost(data: (arg0: string) => void, usage: (usage: Usage) => void, prompt: string, conversationId: string = "default", userName: string = "User", type: number = MessageType.User) {
+		let oAIKey = this.getOpenAIKey();
+		let conversation = this.getConversation(conversationId, userName);
+		if (this.options.moderation) {
+			let flagged = await this.moderate(prompt, oAIKey.key);
+			if (flagged) {
+				return { message: "Your message was flagged as inappropriate and was not sent." };
+			}
+		}
 
+		let promptStr = this.generatePrompt(conversation, prompt, type);
+		let prompt_tokens = this.countTokens(promptStr);
+		try {
+			const response = await axios.post(
+				this.options.endpoint,
+				{
+					model: this.options.model,
+					messages: promptStr,
+					temperature: this.options.temperature,
+					max_tokens: this.options.max_tokens,
+					top_p: this.options.top_p,
+					frequency_penalty: this.options.frequency_penalty,
+					presence_penalty: this.options.presence_penalty,
+					stream: false, // Note this
+					functions: this.options.functions,
+					function_call: this.options.function_call,
+				},
+				{
+					responseType: "json", // Note this
+					headers: {
+						Accept: "application/json", // Note this
+						"Content-Type": "application/json",
+						Authorization: `Bearer ${oAIKey.key}`,
+					},
+				},
+			);
+		//	console.log("Stream message:", response.data.choices[0])
+			let completion_tokens = response.data.usage['completion_tokens'];
+
+			let usageData = {
+				key: oAIKey.key,
+				prompt_tokens: prompt_tokens,
+				completion_tokens: completion_tokens,
+				total_tokens: prompt_tokens + completion_tokens,
+			};
+
+			if (this.onUsage) this.onUsage(usageData);
+
+			oAIKey.tokens += usageData.total_tokens;
+			oAIKey.balance = (oAIKey.tokens / 1000) * this.options.price;
+			oAIKey.queries++;
+
+			conversation.messages.push({
+				id: randomUUID(),
+				content: response.data.choices[0]['message']['content'] ? response.data.choices[0]['message']['content'] : "",
+				type: MessageType.Assistant,
+				date: Date.now(),
+			});
+			data(JSON.stringify(response.data.choices[0]))
+			return response.data.choices[0]; // return the full response
+		} catch (error: any) {
+			if (error.response && error.response.data && error.response.headers["content-type"] === "application/json") {
+				throw new Error(error.response.data.error.message);
+			} else {
+				throw new Error(error.message);
+			}
+		}
+	}
 	public async moderate(prompt: string, key: string) {
 		try {
 			let openAi = new OpenAIApi(new Configuration({ apiKey: key }));
@@ -252,11 +348,11 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 		}
 	}
 
-	private generatePrompt(conversation: Conversation, prompt: string): Message[] {
+	private generatePrompt(conversation: Conversation, prompt: string, type: number = MessageType.User): Message[] {
 		conversation.messages.push({
 			id: randomUUID(),
 			content: prompt,
-			type: MessageType.User,
+			type: type,
 			date: Date.now(),
 		});
 
