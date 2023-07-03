@@ -164,7 +164,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 		}
 
 		let promptStr = this.generatePrompt(conversation, prompt);
-		console.log(promptStr);
+		//console.log(promptStr);
 		let prompt_tokens = this.countTokens(promptStr);
 		try {
 			const response = await axios.post(
