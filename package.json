@@ -1,6 +1,6 @@
 {
 	"name": "chatgpt-optimized-official",
-	"version": "1.1.4",
+	"version": "1.1.6",
 	"description": "ChatGPT Client using official OpenAI API",
 	"main": "dist/index.js",
 	"type": "module",

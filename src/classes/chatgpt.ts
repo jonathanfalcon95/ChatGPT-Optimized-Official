@@ -258,7 +258,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			}
 		}
 	}
-	public async askV1(prompt: string, conversationId: string = "default", userName: string = "User", type:number=1) {
+	public async askV1(prompt: string, conversationId: string = "default", type:number=1, userName: string = "User") {
 		return await this.askPost(
 			(data) => { },
 			(data) => { },

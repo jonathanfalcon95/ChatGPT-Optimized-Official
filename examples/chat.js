@@ -59,7 +59,7 @@ async function main() {
     process.stdout.write("ChatGPT: ");
     await bot.askPost(res => {
       process.stdout.write(res.toString());
-    }, _ => { }, prompt, "16");
+    }, _ => { }, prompt, "17");
     console.log();
   }
 }
