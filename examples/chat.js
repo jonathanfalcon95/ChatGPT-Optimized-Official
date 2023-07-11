@@ -6,7 +6,7 @@ const rl = readline.createInterface({
   output: process.stdout
 });
 
-let bot = new ChatGPT("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", {
+let bot = new ChatGPT("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", {
   temperature: 0.7, // OpenAI parameter
   max_tokens: 256, // OpenAI parameter [Max response size by tokens]
   top_p: 0.9, // OpenAI parameter
@@ -59,7 +59,7 @@ async function main() {
     process.stdout.write("ChatGPT: ");
     await bot.askPost(res => {
       process.stdout.write(res.toString());
-    }, _ => { }, prompt, "17");
+    }, _ => { }, prompt, "19");
     console.log();
   }
 }

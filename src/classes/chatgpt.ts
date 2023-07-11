@@ -51,8 +51,8 @@ class ChatGPT {
 			max_conversation_tokens: options?.max_conversation_tokens || 4097,
 			endpoint: options?.endpoint || "https://api.openai.com/v1/chat/completions",
 			moderation: options?.moderation || false,
-			functions: options?.functions || [],
-			function_call: options?.function_call || "",
+			functions: options?.functions || null,
+			function_call: options?.function_call || null,
 		};
 	}
 
@@ -178,8 +178,6 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 					frequency_penalty: this.options.frequency_penalty,
 					presence_penalty: this.options.presence_penalty,
 					stream: true,
-					functions: this.options.functions,
-					function_call: this.options.function_call,
 				},
 				{
 					responseType: "stream",
@@ -258,7 +256,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			}
 		}
 	}
-	public async askV1(prompt: string, conversationId: string = "default", type:number=1, userName: string = "User") {
+	public async askV1(prompt: string, conversationId: string = "default", type: number = 1, userName: string = "User") {
 		return await this.askPost(
 			(data) => { },
 			(data) => { },
@@ -281,20 +279,23 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 		let promptStr = this.generatePrompt(conversation, prompt, type);
 		let prompt_tokens = this.countTokens(promptStr);
 		try {
+			let auxOptions = {
+				model: this.options.model,
+				messages: promptStr,
+				temperature: this.options.temperature,
+				max_tokens: this.options.max_tokens,
+				top_p: this.options.top_p,
+				frequency_penalty: this.options.frequency_penalty,
+				presence_penalty: this.options.presence_penalty,
+				stream: false, // Note this
+			}
+			if(this.options.functions){
+				auxOptions["functions"] = this.options.functions;
+				auxOptions["function_call"] = this.options.function_call?this.options.function_call:"auto";
+			}
 			const response = await axios.post(
 				this.options.endpoint,
-				{
-					model: this.options.model,
-					messages: promptStr,
-					temperature: this.options.temperature,
-					max_tokens: this.options.max_tokens,
-					top_p: this.options.top_p,
-					frequency_penalty: this.options.frequency_penalty,
-					presence_penalty: this.options.presence_penalty,
-					stream: false, // Note this
-					functions: this.options.functions,
-					function_call: this.options.function_call,
-				},
+				auxOptions,
 				{
 					responseType: "json", // Note this
 					headers: {
@@ -304,7 +305,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 					},
 				},
 			);
-		//	console.log("Stream message:", response.data.choices[0])
+			//console.log("Stream message:", response.data.choices[0])
 			let completion_tokens = response.data.usage['completion_tokens'];
 
 			let usageData = {
