@@ -6,7 +6,7 @@ const rl = readline.createInterface({
   output: process.stdout
 });
 
-let bot = new ChatGPT("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", {
+let bot = new ChatGPT(process.env.OPENAI_API_KEY, {
   temperature: 0.7, // OpenAI parameter
   max_tokens: 256, // OpenAI parameter [Max response size by tokens]
   top_p: 0.9, // OpenAI parameter
