@@ -177,7 +177,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 					top_p: this.options.top_p,
 					frequency_penalty: this.options.frequency_penalty,
 					presence_penalty: this.options.presence_penalty,
-					stream: true,
+					stream: true
 				},
 				{
 					responseType: "stream",
