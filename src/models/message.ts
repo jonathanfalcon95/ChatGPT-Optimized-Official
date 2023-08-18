@@ -5,6 +5,7 @@ interface Message {
 	type: MessageType;
 	content: string;
 	date: number;
+	name?: string;
 }
 
 export default Message;

@@ -256,17 +256,18 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			}
 		}
 	}
-	public async askV1(prompt: string, conversationId: string = "default", type: number = 1, userName: string = "User") {
+	public async askV1(prompt: string, conversationId: string = "default", type: number = 1, function_name?: string, userName: string = "User") {
 		return await this.askPost(
 			(data) => { },
 			(data) => { },
 			prompt,
 			conversationId,
+			function_name,
 			userName,
 			type
 		);
 	}
-	public async askPost(data: (arg0: string) => void, usage: (usage: Usage) => void, prompt: string, conversationId: string = "default", userName: string = "User", type: number = MessageType.User) {
+	public async askPost(data: (arg0: string) => void, usage: (usage: Usage) => void, prompt: string, conversationId: string = "default",function_name?: string, userName: string = "User", type: number = MessageType.User) {
 		let oAIKey = this.getOpenAIKey();
 		let conversation = this.getConversation(conversationId, userName);
 		if (this.options.moderation) {
@@ -276,7 +277,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			}
 		}
 
-		let promptStr = this.generatePrompt(conversation, prompt, type);
+		let promptStr = this.generatePrompt(conversation, prompt, type, function_name);
 		let prompt_tokens = this.countTokens(promptStr);
 		try {
 			let auxOptions = {
@@ -349,14 +350,19 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 		}
 	}
 
-	private generatePrompt(conversation: Conversation, prompt: string, type: number = MessageType.User): Message[] {
-		conversation.messages.push({
+	private generatePrompt(conversation: Conversation, prompt: string,  type: number = MessageType.User, function_name?: string): Message[] {
+		let message = {
 			id: randomUUID(),
 			content: prompt,
 			type: type,
 			date: Date.now(),
-		});
-
+		};
+		
+		if (type === MessageType.Function && function_name) {
+			message["name"] = function_name;
+		}
+		
+		conversation.messages.push(message);
 		let messages = this.generateMessages(conversation);
 		let promptEncodedLength = this.countTokens(messages);
 		let totalLength = promptEncodedLength + this.options.max_tokens;
@@ -380,10 +386,19 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 		});
 		for (let i = 0; i < conversation.messages.length; i++) {
 			let message = conversation.messages[i];
-			messages.push({
-				role: message.type === MessageType.User ? "user" : "assistant",
-				content: message.content,
-			});
+			if (message.type === MessageType.Function) {
+				messages.push({
+					role: "function",
+					name: message.name || "unknownFunction", // Default to "unknownFunction" if function_name is not provided
+					content: message.content,
+				});
+			} else {
+				let role = message.type === MessageType.User ? "user" : "assistant";
+				messages.push({
+					role: role,
+					content: message.content,
+				});
+			}
 		}
 		return messages;
 	}
