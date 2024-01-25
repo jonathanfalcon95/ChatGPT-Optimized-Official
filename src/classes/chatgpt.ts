@@ -8,7 +8,7 @@ import Message from "../models/chatgpt-message.js";
 import MessageType from "../enums/message-type.js";
 import AppDbContext from "./app-dbcontext.js";
 import OpenAIKey from "../models/openai-key.js";
-import { Configuration, OpenAIApi } from "openai";
+//import { Configuration, OpenAIApi } from "openai";
 import { type } from "os";
 
 class ChatGPT {
@@ -322,12 +322,14 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			oAIKey.balance = (oAIKey.tokens / 1000) * this.options.price;
 			oAIKey.queries++;
 
-			conversation.messages.push({
-				id: randomUUID(),
-				content: response.data.choices[0]['message']['content'] ? response.data.choices[0]['message']['content'] : "",
-				type: MessageType.Assistant,
-				date: Date.now(),
-			});
+			if(response.data.choices[0]['message']['content']) {
+				conversation.messages.push({
+					id: randomUUID(),
+					content: response.data.choices[0]['message']['content'] ? response.data.choices[0]['message']['content'] : "",
+					type: MessageType.Assistant,
+					date: Date.now(),
+				});
+			}
 			data(JSON.stringify(response.data.choices[0]))
 			return response.data.choices[0]; // return the full response
 		} catch (error: any) {
@@ -339,15 +341,16 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 		}
 	}
 	public async moderate(prompt: string, key: string) {
-		try {
-			let openAi = new OpenAIApi(new Configuration({ apiKey: key }));
-			let response = await openAi.createModeration({
-				input: prompt,
-			});
-			return response.data.results[0].flagged;
-		} catch (error) {
-			return false;
-		}
+		// try {
+		// 	let openAi = new OpenAIApi(new Configuration({ apiKey: key }));
+		// 	let response = await openAi.createModeration({
+		// 		input: prompt,
+		// 	});
+		// 	return response.data.results[0].flagged;
+		// } catch (error) {
+		// 	return false;
+		// }
+		return false;
 	}
 
 	private generatePrompt(conversation: Conversation, prompt: string,  type: number = MessageType.User, function_name?: string): Message[] {

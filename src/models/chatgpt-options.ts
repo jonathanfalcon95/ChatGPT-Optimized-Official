@@ -12,6 +12,8 @@ interface ChatGPTOptions {
 	endpoint?: string;
 	functions?:[];
 	function_call?: string;
+	name_assistant?: string;
+	tools?: any[];
 } 
 
 export default ChatGPTOptions;

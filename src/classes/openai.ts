@@ -1,5 +1,5 @@
 import { encode } from "gpt-3-encoder";
-import { Configuration, OpenAIApi } from "openai";
+//import { Configuration, OpenAIApi } from "openai";
 import axios from "axios";
 
 import Options from "../models/options.js";
@@ -281,15 +281,16 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 	}
 
 	public async moderate(prompt: string, key: string) {
-		try {
-			let openAi = new OpenAIApi(new Configuration({ apiKey: key }));
-			let response = await openAi.createModeration({
-				input: prompt,
-			});
-			return response.data.results[0].flagged;
-		} catch (error) {
-			return false;
-		}
+		// try {
+		// 	let openAi = new OpenAIApi(new Configuration({ apiKey: key }));
+		// 	let response = await openAi.createModeration({
+		// 		input: prompt,
+		// 	});
+		// 	return response.data.results[0].flagged;
+		// } catch (error) {
+		// 	return false;
+		// }
+		return false;
 	}
 
 	private convToString(conversation: Conversation) {
