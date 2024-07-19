@@ -6,6 +6,7 @@ interface Message {
 	content: string;
 	date: number;
 	name?: string;
+	tool_call_id?: string;
 }
 
 export default Message;

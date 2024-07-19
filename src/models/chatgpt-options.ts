@@ -13,7 +13,8 @@ interface ChatGPTOptions {
 	functions?:[];
 	function_call?: string;
 	name_assistant?: string;
-	tools?: any[];
+	tools?: [];
+	tool_choice?: string;
 } 
 
 export default ChatGPTOptions;

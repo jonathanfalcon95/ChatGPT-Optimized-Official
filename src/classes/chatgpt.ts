@@ -53,6 +53,8 @@ class ChatGPT {
 			moderation: options?.moderation || false,
 			functions: options?.functions || null,
 			function_call: options?.function_call || null,
+			tools: options?.tools || null,
+			tool_choice: options?.tool_choice || 'auto',
 		};
 	}
 
@@ -256,7 +258,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			}
 		}
 	}
-	public async askV1(prompt: string, conversationId: string = "default", type: number = 1, function_name?: string, userName: string = "User") {
+	public async askV1(prompt: string, conversationId: string = "default", type: number = 1, function_name?: string, tool_call_id?:string, userName: string = "User") {
 		return await this.askPost(
 			(data) => { },
 			(data) => { },
@@ -264,20 +266,23 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			conversationId,
 			function_name,
 			userName,
-			type
+			type,
+            tool_call_id
 		);
 	}
-	public async askPost(data: (arg0: string) => void, usage: (usage: Usage) => void, prompt: string, conversationId: string = "default",function_name?: string, userName: string = "User", type: number = MessageType.User) {
+	public async askPost(data: (arg0: string) => void, usage: (usage: Usage) => void, prompt: string, conversationId: string = "default",function_name?: string, userName: string = "User", type: number = MessageType.User, tool_call_id?: string) {
 		let oAIKey = this.getOpenAIKey();
 		let conversation = this.getConversation(conversationId, userName);
-		if (this.options.moderation) {
-			let flagged = await this.moderate(prompt, oAIKey.key);
-			if (flagged) {
-				return { message: "Your message was flagged as inappropriate and was not sent." };
-			}
-		}
+		// if (this.options.moderation) {
+		// 	let flagged = await this.moderate(prompt, oAIKey.key);
+		// 	if (flagged) {
+		// 		return { message: "Your message was flagged as inappropriate and was not sent." };
+		// 	}
+		// }
 
-		let promptStr = this.generatePrompt(conversation, prompt, type, function_name);
+		let promptStr = this.generatePrompt(conversation, prompt, type, function_name, tool_call_id);
+		//console.log(promptStr)
+
 		let prompt_tokens = this.countTokens(promptStr);
 		try {
 			let auxOptions = {
@@ -289,11 +294,14 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 				frequency_penalty: this.options.frequency_penalty,
 				presence_penalty: this.options.presence_penalty,
 				stream: false, // Note this
+				tools : this.options.tools,
+				tool_choice : this.options.tool_choice
 			}
 			if(this.options.functions){
 				auxOptions["functions"] = this.options.functions;
 				auxOptions["function_call"] = this.options.function_call?this.options.function_call:"auto";
 			}
+		 // console.log("aux options:", auxOptions)
 			const response = await axios.post(
 				this.options.endpoint,
 				auxOptions,
@@ -306,7 +314,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 					},
 				},
 			);
-			//console.log("Stream message:", response.data.choices[0])
+		//	console.log("Stream message:", response.data.choices[0])
 			let completion_tokens = response.data.usage['completion_tokens'];
 
 			let usageData = {
@@ -353,16 +361,18 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 		return false;
 	}
 
-	private generatePrompt(conversation: Conversation, prompt: string,  type: number = MessageType.User, function_name?: string): Message[] {
+	private generatePrompt(conversation: Conversation, prompt: string,  type: number = MessageType.User, function_name?: string, tool_call_id?: string): Message[] {
 		let message = {
 			id: randomUUID(),
 			content: prompt,
 			type: type,
 			date: Date.now(),
+
 		};
 		
 		if (type === MessageType.Function && function_name) {
 			message["name"] = function_name;
+			message["tool_call_id"] = tool_call_id;	
 		}
 		
 		conversation.messages.push(message);
@@ -391,7 +401,8 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			let message = conversation.messages[i];
 			if (message.type === MessageType.Function) {
 				messages.push({
-					role: "function",
+					tool_call_id: message.tool_call_id,
+					role: "tool",
 					name: message.name || "unknownFunction", // Default to "unknownFunction" if function_name is not provided
 					content: message.content,
 				});

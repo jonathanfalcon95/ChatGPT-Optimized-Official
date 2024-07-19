@@ -18,6 +18,10 @@ class Assistant {
     public onUsage: (usage: Usage) => void;
     private openai: OpenAI;
     private assistantId: string;
+    private theadId: string;
+    private runId: string;
+    // Este objeto mantiene un mapeo de conversationId a threadId
+    private conversationThreads: { [conversationId: string]: string } = {};
     constructor(key: string | string[], options?: Options) {
         this.db = new AppDbContext();
         this.db.WaitForLoad().then(() => {
@@ -58,49 +62,50 @@ class Assistant {
             functions: options?.functions || null,
             function_call: options?.function_call || null,
             name_assistant: options?.name_assistant || "My Assistant",
-            tools: options?.tools || options?.functions.map(item=>{
-              return  { type: "function", function:item }
-            })
+            tools: options?.tools || null,
+            tool_choice: options?.tool_choice || null,
         };
 
-        this.openai = new OpenAI({ apiKey: String(key)});
+        this.openai = new OpenAI({ apiKey: String(key) });
         this.createAssistant(this.options)
     }
     // Paso 1: Crear un Asistente
     public async createAssistant(options: Options) {
         try {
-        const response = await this.openai.beta.assistants.create({
-            name: options.name_assistant, // Name of the assistant
-            instructions: options.instructions, // Instructions for the assistant
-            tools: options.tools, // List of tools to be used by the assistant
-            model: options.model, // ID of the GPT-3 model to be used by the assistant
-        });
-        console.log(response);
-        // this.assistantId = response.data.id;
-       // return response;
-    } catch (error) { console.log(error) }
-       
+            const response = await this.openai.beta.assistants.create({
+                name: options.name_assistant, // Name of the assistant
+                instructions: options.instructions, // Instructions for the assistant
+                tools: options.tools, // List of tools to be used by the assistant
+                model: options.model, // ID of the GPT-3 model to be used by the assistant
+            });
+            console.log(response);
+            this.assistantId = response.id;
+            // return response;
+        } catch (error) { console.log(error) }
+
     }
     // Paso 2: Crear un Hilo
     public async createThread(): Promise<string> {
         const response = await this.openai.beta.threads.create();
+        this.theadId = response.id;
         return response.id;
     }
 
     // Paso 3: Agregar un Mensaje a un Hilo
-    // public async addMessageToThread(threadId: string, content: string, role: "user" | "assistant") {
-    //     return await this.openai.beta.threads.messages.create(threadId, {
-    //         role: role,
-    //         content: content
-    //     });
-    // }
+    public async addMessageToThread(threadId: string, content: string) {
+        return await this.openai.beta.threads.messages.create(threadId, {
+            role: 'user',
+            content: content
+        });
+    }
 
     // Paso 4: Ejecutar el Asistente
     public async runAssistant(threadId: string, instructions?: string) {
-        return await this.openai.beta.threads.runs.create(threadId, {
+        const response = await this.openai.beta.threads.runs.create(threadId, {
             assistant_id: this.assistantId,
             instructions: instructions || ''
         });
+        return response.id;
     }
 
     // Paso 5: Verificar el Estado de Ejecución
@@ -112,6 +117,50 @@ class Assistant {
     public async getAssistantResponses(threadId: string) {
         const messages = await this.openai.beta.threads.messages.list(threadId);
         return messages.data.filter(message => message.role === "assistant");
+    }
+    // Paso 7: Crear y Ejecutar un Hilo
+    public async createAndRunThread(prompt: string, userName: string = "User", conversationId: string | null = null): Promise<any> {
+        let threadId: string;
+
+        // Si no se proporciona un conversationId, crea un nuevo hilo y usa su ID como conversationId
+        if (!conversationId) {
+            threadId = await this.createThread();
+            // Aquí asumimos que createThread retorna el ID del nuevo hilo
+        } else {
+            // Si se proporciona un conversationId, úsalo como el threadId para continuar la conversación
+            threadId = conversationId;
+        }
+        // Crear un nuevo hilo
+        // const threadId = await this.createThread();
+
+        // Agregar el mensaje del usuario al hilo
+        await this.addMessageToThread(threadId, prompt);
+
+        // Ejecutar el asistente en el hilo y obtener la ID de la ejecución
+        const runId = await this.runAssistant(threadId);
+
+        // Esperar a que la ejecución termine y obtener la respuesta
+        await this.waitForRunToComplete(threadId, runId);
+
+        // Obtener las respuestas del asistente
+        const responses = await this.getAssistantResponses(threadId);
+
+        // Retornar la respuesta formateada
+        const formattedResponse = this.formatResponse(responses);
+        return { conversationId: threadId, ...formattedResponse };
+    }
+    public async waitForRunToComplete(threadId: string, runId: string): Promise<void> {
+        let status = await this.checkRunStatus(threadId, runId);
+        while (status.status !== 'completed') {
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Esperar 1 segundo antes de verificar nuevamente
+            status = await this.checkRunStatus(threadId, runId);
+        }
+    }
+    public formatResponse(responses: any[]): any {
+        // Asumiendo que las respuestas están en el formato deseado
+        // y que simplemente necesitamos devolver la primera respuesta
+        console.log(responses[0].content);
+        return responses.length > 0 ? responses[0].content : null;
     }
     private getOpenAIKey(): OpenAIKey {
         let key = this.db.keys.OrderBy((x) => x.balance).FirstOrDefault();
@@ -196,124 +245,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
         return conversation;
     }
 
-    public async ask(prompt: string, conversationId: string = "default", userName: string = "User") {
-        return await this.askStream(
-            (data) => { },
-            (data) => { },
-            prompt,
-            conversationId,
-            userName,
-        );
-    }
-
-    public async askStream(data: (arg0: string) => void, usage: (usage: Usage) => void, prompt: string, conversationId: string = "default", userName: string = "User") {
-        let oAIKey = this.getOpenAIKey();
-        let conversation = this.getConversation(conversationId, userName);
-        if (this.options.moderation) {
-            let flagged = await this.moderate(prompt, oAIKey.key);
-            if (flagged) {
-                for (let chunk in "Your message was flagged as inappropriate and was not sent.".split("")) {
-                    data(chunk);
-                    await this.wait(100);
-                }
-                return "Your message was flagged as inappropriate and was not sent.";
-            }
-        }
-
-        let promptStr = this.generatePrompt(conversation, prompt);
-        //console.log(promptStr);
-        let prompt_tokens = this.countTokens(promptStr);
-        try {
-            const response = await axios.post(
-                this.options.endpoint,
-                {
-                    model: this.options.model,
-                    messages: promptStr,
-                    temperature: this.options.temperature,
-                    max_tokens: this.options.max_tokens,
-                    top_p: this.options.top_p,
-                    frequency_penalty: this.options.frequency_penalty,
-                    presence_penalty: this.options.presence_penalty,
-                    stream: true
-                },
-                {
-                    responseType: "stream",
-                    headers: {
-                        Accept: "text/event-stream",
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${oAIKey.key}`,
-                    },
-                },
-            );
-            // console.log("Stream message:",  response.data)
-            let responseStr = "";
-            let responseArg = "";
-            let responseNameFunction = "";
-            for await (const message of this.streamCompletion(response.data)) {
-                try {
-                    const parsed = JSON.parse(message);
-                    const { delta, finish_reason } = parsed.choices[0];
-                    const { content, function_call } = delta;
-
-                    if (function_call) {
-                        responseNameFunction += function_call.name;
-                        responseArg += function_call.arguments;
-
-                    }
-                    //console.log("Stream message:", parsed.choices[0])
-                    if (finish_reason === "function_call") {
-                        responseStr = JSON.stringify({ "name": responseNameFunction, "arguments": responseArg });
-                        data(responseStr);
-                    } else
-                        if (content) {
-                            responseStr += content;
-                            data(content);
-                        }
-                } catch (error) {
-                    console.error("Could not JSON parse stream message", message, error);
-                }
-            }
-
-            let completion_tokens = encode(responseStr).length;
-
-            let usageData = {
-                key: oAIKey.key,
-                prompt_tokens: prompt_tokens,
-                completion_tokens: completion_tokens,
-                total_tokens: prompt_tokens + completion_tokens,
-            };
-
-            usage(usageData);
-            if (this.onUsage) this.onUsage(usageData);
-
-            oAIKey.tokens += usageData.total_tokens;
-            oAIKey.balance = (oAIKey.tokens / 1000) * this.options.price;
-            oAIKey.queries++;
-
-            conversation.messages.push({
-                id: randomUUID(),
-                content: responseStr,
-                type: MessageType.Assistant,
-                date: Date.now(),
-            });
-
-            return responseStr;
-        } catch (error: any) {
-            if (error.response && error.response.data && error.response.headers["content-type"] === "application/json") {
-                let errorResponseStr = "";
-
-                for await (const message of error.response.data) {
-                    errorResponseStr += message;
-                }
-
-                const errorResponseJson = JSON.parse(errorResponseStr);
-                throw new Error(errorResponseJson.error.message);
-            } else {
-                throw new Error(error.message);
-            }
-        }
-    }
-    public async askV1(prompt: string, conversationId: string = "default", type: number = 1, function_name?: string, userName: string = "User") {
+    public async ask(prompt: string, conversationId: string = "default", type: number = 1, function_name?: string, userName: string = "User") {
         return await this.askPost(
             (data) => { },
             (data) => { },
@@ -324,78 +256,81 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
             type
         );
     }
+
     public async askPost(data: (arg0: string) => void, usage: (usage: Usage) => void, prompt: string, conversationId: string = "default", function_name?: string, userName: string = "User", type: number = MessageType.User) {
-        let oAIKey = this.getOpenAIKey();
-        let conversation = this.getConversation(conversationId, userName);
-        if (this.options.moderation) {
-            let flagged = await this.moderate(prompt, oAIKey.key);
-            if (flagged) {
-                return { message: "Your message was flagged as inappropriate and was not sent." };
-            }
-        }
+      
+        return await this.createAndRunThread(prompt, userName, conversationId);
+        // let oAIKey = this.getOpenAIKey();
+        // let conversation = this.getConversation(conversationId, userName);
+        // // if (this.options.moderation) {
+        // //     let flagged = await this.moderate(prompt, oAIKey.key);
+        // //     if (flagged) {
+        // //         return { message: "Your message was flagged as inappropriate and was not sent." };
+        // //     }
+        // // }
 
-        let promptStr = this.generatePrompt(conversation, prompt, type, function_name);
-        let prompt_tokens = this.countTokens(promptStr);
-        try {
-            let auxOptions = {
-                model: this.options.model,
-                messages: promptStr,
-                temperature: this.options.temperature,
-                max_tokens: this.options.max_tokens,
-                top_p: this.options.top_p,
-                frequency_penalty: this.options.frequency_penalty,
-                presence_penalty: this.options.presence_penalty,
-                stream: false, // Note this
-            }
-            if (this.options.functions) {
-                auxOptions["functions"] = this.options.functions;
-                auxOptions["function_call"] = this.options.function_call ? this.options.function_call : "auto";
-            }
-            const response = await axios.post(
-                this.options.endpoint,
-                auxOptions,
-                {
-                    responseType: "json", // Note this
-                    headers: {
-                        Accept: "application/json", // Note this
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${oAIKey.key}`,
-                    },
-                },
-            );
-            //console.log("Stream message:", response.data.choices[0])
-            let completion_tokens = response.data.usage['completion_tokens'];
+        // let promptStr = this.generatePrompt(conversation, prompt, type, function_name);
+        // let prompt_tokens = this.countTokens(promptStr);
+        // try {
+        //     let auxOptions = {
+        //         model: this.options.model,
+        //         messages: promptStr,
+        //         temperature: this.options.temperature,
+        //         max_tokens: this.options.max_tokens,
+        //         top_p: this.options.top_p,
+        //         frequency_penalty: this.options.frequency_penalty,
+        //         presence_penalty: this.options.presence_penalty,
+        //         stream: false, // Note this
+        //     }
+        //     if (this.options.functions) {
+        //         auxOptions["functions"] = this.options.functions;
+        //         auxOptions["function_call"] = this.options.function_call ? this.options.function_call : "auto";
+        //     }
+        //     const response = await axios.post(
+        //         this.options.endpoint,
+        //         auxOptions,
+        //         {
+        //             responseType: "json", // Note this
+        //             headers: {
+        //                 Accept: "application/json", // Note this
+        //                 "Content-Type": "application/json",
+        //                 Authorization: `Bearer ${oAIKey.key}`,
+        //             },
+        //         },
+        //     );
+        //     //console.log("Stream message:", response.data.choices[0])
+        //     let completion_tokens = response.data.usage['completion_tokens'];
 
-            let usageData = {
-                key: oAIKey.key,
-                prompt_tokens: prompt_tokens,
-                completion_tokens: completion_tokens,
-                total_tokens: prompt_tokens + completion_tokens,
-            };
+        //     let usageData = {
+        //         key: oAIKey.key,
+        //         prompt_tokens: prompt_tokens,
+        //         completion_tokens: completion_tokens,
+        //         total_tokens: prompt_tokens + completion_tokens,
+        //     };
 
-            if (this.onUsage) this.onUsage(usageData);
+        //     if (this.onUsage) this.onUsage(usageData);
 
-            oAIKey.tokens += usageData.total_tokens;
-            oAIKey.balance = (oAIKey.tokens / 1000) * this.options.price;
-            oAIKey.queries++;
+        //     oAIKey.tokens += usageData.total_tokens;
+        //     oAIKey.balance = (oAIKey.tokens / 1000) * this.options.price;
+        //     oAIKey.queries++;
 
-            if (response.data.choices[0]['message']['content']) {
-                conversation.messages.push({
-                    id: randomUUID(),
-                    content: response.data.choices[0]['message']['content'] ? response.data.choices[0]['message']['content'] : "",
-                    type: MessageType.Assistant,
-                    date: Date.now(),
-                });
-            }
-            data(JSON.stringify(response.data.choices[0]))
-            return response.data.choices[0]; // return the full response
-        } catch (error: any) {
-            if (error.response && error.response.data && error.response.headers["content-type"] === "application/json") {
-                throw new Error(error.response.data.error.message);
-            } else {
-                throw new Error(error.message);
-            }
-        }
+        //     if (response.data.choices[0]['message']['content']) {
+        //         conversation.messages.push({
+        //             id: randomUUID(),
+        //             content: response.data.choices[0]['message']['content'] ? response.data.choices[0]['message']['content'] : "",
+        //             type: MessageType.Assistant,
+        //             date: Date.now(),
+        //         });
+        //     }
+        //     data(JSON.stringify(response.data.choices[0]))
+        //     return response.data.choices[0]; // return the full response
+        // } catch (error: any) {
+        //     if (error.response && error.response.data && error.response.headers["content-type"] === "application/json") {
+        //         throw new Error(error.response.data.error.message);
+        //     } else {
+        //         throw new Error(error.message);
+        //     }
+        // }
     }
     public async moderate(prompt: string, key: string) {
         // try {
