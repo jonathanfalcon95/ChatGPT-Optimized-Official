@@ -331,12 +331,26 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			oAIKey.queries++;
 
 			if(response.data.choices[0]['message']['content']) {
-				conversation.messages.push({
-					id: randomUUID(),
-					content: response.data.choices[0]['message']['content'] ? response.data.choices[0]['message']['content'] : "",
-					type: MessageType.Assistant,
-					date: Date.now(),
-				});
+				if(response.data.choices[0].finish_reason=="tool_calls"){
+					conversation.messages.push({
+						id: randomUUID(),
+						content: response.data.choices[0]['message']['content'],
+						type: MessageType.Assistant,
+						date: Date.now(),
+						name: function_name,
+						tool_calls: response.data.choices[0]['message']['tool_calls'],
+					});
+				}
+					else{
+						conversation.messages.push({
+							id: randomUUID(),
+							content: response.data.choices[0]['message']['content'] ? response.data.choices[0]['message']['content'] : "",
+							type: MessageType.Assistant,
+							date: Date.now(),
+							
+						});
+					}
+				
 			}
 			data(JSON.stringify(response.data.choices[0]))
 			return response.data.choices[0]; // return the full response
@@ -361,61 +375,96 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 		return false;
 	}
 
-	private generatePrompt(conversation: Conversation, prompt: string,  type: number = MessageType.User, function_name?: string, tool_call_id?: string): Message[] {
-		let message = {
-			id: randomUUID(),
-			content: prompt,
-			type: type,
-			date: Date.now(),
+	// Función para generar el prompt basado en la conversación y el mensaje actual
+private generatePrompt(conversation: Conversation, prompt: string, type: number = MessageType.User, function_name?: string, tool_call_id?: string): Message[] {
+    // Crear un nuevo mensaje basado en el prompt y el tipo de mensaje
+    let message = {
+        id: randomUUID(),
+        content: prompt,
+        type: type,
+        date: Date.now(),
+    };
 
-		};
-		
-		if (type === MessageType.Function && function_name) {
-			message["name"] = function_name;
-			message["tool_call_id"] = tool_call_id;	
-		}
-		
-		conversation.messages.push(message);
-		let messages = this.generateMessages(conversation);
-		let promptEncodedLength = this.countTokens(messages);
-		let totalLength = promptEncodedLength + this.options.max_tokens;
+    // Si el mensaje es de tipo Function, agregar el nombre de la función y el ID de la llamada a la herramienta
+    if (type === MessageType.Function && function_name) {
+        message["name"] = function_name;
+        message["tool_call_id"] = tool_call_id;
+    }
 
-		while (totalLength > this.options.max_conversation_tokens) {
-			conversation.messages.shift();
-			messages = this.generateMessages(conversation);
-			promptEncodedLength = this.countTokens(messages);
-			totalLength = promptEncodedLength + this.options.max_tokens;
-		}
+    // Agregar el nuevo mensaje a la conversación
+    conversation.messages.push(message);
 
-		conversation.lastActive = Date.now();
-		return messages;
-	}
+    // Generar los mensajes para la conversación
+    let messages = this.generateMessages(conversation);
 
-	private generateMessages(conversation: Conversation): Message[] {
-		let messages: Message[] = [];
-		messages.push({
-			role: "system",
-			content: this.getInstructions(conversation.userName),
-		});
-		for (let i = 0; i < conversation.messages.length; i++) {
-			let message = conversation.messages[i];
-			if (message.type === MessageType.Function) {
+    // Calcular la longitud del prompt codificado en tokens
+    let promptEncodedLength = this.countTokens(messages);
+
+    // Calcular la longitud total (prompt + respuesta máxima permitida)
+    let totalLength = promptEncodedLength + this.options.max_tokens;
+
+    // Si la longitud total excede el máximo permitido, eliminar mensajes antiguos
+    while (totalLength > this.options.max_conversation_tokens) {
+        conversation.messages.shift(); // Eliminar el mensaje más antiguo
+        messages = this.generateMessages(conversation); // Regenerar los mensajes
+        promptEncodedLength = this.countTokens(messages); // Recalcular la longitud del prompt
+        totalLength = promptEncodedLength + this.options.max_tokens; // Recalcular la longitud total
+    }
+
+    // Actualizar la última actividad de la conversación
+    conversation.lastActive = Date.now();
+
+    return messages; // Devolver los mensajes generados
+}
+
+// Función para generar los mensajes de la conversación
+private generateMessages(conversation: Conversation): Message[] {
+    let messages: Message[] = [];
+
+    // Agregar el mensaje del sistema con las instrucciones
+    messages.push({
+        role: "system",
+        content: this.getInstructions(conversation.userName),
+    });
+
+    // Iterar sobre los mensajes de la conversación
+    for (let i = 0; i < conversation.messages.length; i++) {
+        let message = conversation.messages[i];
+
+        // Si el mensaje es de tipo Function, agregar los detalles de la función
+        if (message.type === MessageType.Function) {
+            messages.push({
+                tool_call_id: message.tool_call_id,
+                role: "tool",
+                name: message.name || "unknownFunction", // Usar "unknownFunction" si no se proporciona un nombre de función
+                content: message.content,
+            });
+        } else if (message.type === MessageType.User) { // Si el mensaje es de tipo User
+            messages.push({
+                role: "user",
+                content: message.content,
+            });
+        } else { // Para otros tipos de mensajes (por ejemplo, Assistant)
+			
+			if (message.tool_calls) {
 				messages.push({
-					tool_call_id: message.tool_call_id,
-					role: "tool",
-					name: message.name || "unknownFunction", // Default to "unknownFunction" if function_name is not provided
+					role: "assistant",
 					content: message.content,
+					tool_calls: message.tool_calls,
 				});
-			} else {
-				let role = message.type === MessageType.User ? "user" : "assistant";
+			}
+			else {
 				messages.push({
-					role: role,
+					role: "assistant",
 					content: message.content,
 				});
 			}
-		}
-		return messages;
-	}
+        }
+    }
+   
+    return messages; // Devolver los mensajes generados
+}
+
 
 	private countTokens(messages: Message[]): number {
 		let tokens: number = 0;

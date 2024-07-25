@@ -6,7 +6,7 @@ const rl = readline.createInterface({
   output: process.stdout
 });
 
-let bot = new ChatGPT(process.env.OPENAI_API_KEY, {
+let bot = new ChatGPT("", {
   temperature: 0.7, // OpenAI parameter
   max_tokens: 256, // OpenAI parameter [Max response size by tokens]
   top_p: 0.9, // OpenAI parameter
@@ -67,26 +67,8 @@ let bot = new ChatGPT(process.env.OPENAI_API_KEY, {
         "required": ["name", "address", "delivery", "products"]
       }
     }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "saveDataPayment",
-      "description": "Guarda la información del pago del cliente",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "payType": { "type": "string", "enum": ["efectivo", "pago movil", "transferencia bancaria", "binance", "zelle"] },
-          "voucher": {
-            "type": "string",
-            "description": "texto comprobante de pago",
-          }
-
-        },
-        "required": ["payType"],
-      }
-    }
-  }]
+  }
+]
 
 
 }
@@ -106,11 +88,16 @@ async function main() {
     });
 
     process.stdout.write("ChatGPT: ");
-    await bot.askPost(res => {
+  let response =  await bot.askPost(res => {
       process.stdout.write(res.toString());
     }, _ => { }, prompt, "3236385");
-    //console.log();
+    console.log("response new", response);
+    if(response.finish_reason=="tool_calls"){
+      let response2=await bot.askV1("orden creada", "3236385", 3, "createOrder", response.message.tool_calls[0].id);
+      process.stdout.write(response2.toString());
+    }
   }
+  
 }
 
 main();
