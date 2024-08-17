@@ -340,7 +340,8 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 					tool_calls: response.data.choices[0]['message']['tool_calls'],
 				});
 			}
-			if (response.data.choices[0]['message']['content'] && response.data.choices[0].finish_reason != "tool_calls") {
+			else
+			if (response.data.choices[0]['message']['content']) {
 				//console.log("response.data.choices[0]['message']['content']", response.data.choices[0]['message']['content'])
 				conversation.messages.push({
 					id: randomUUID(),

@@ -93,7 +93,9 @@ async function main() {
     }, _ => { }, prompt, "3236385");
     console.log("response new", response);
     if(response.finish_reason=="tool_calls"){
+      console.log("tool_calls pased");
       let response2=await bot.askV1("orden creada", "3236385", 3, "createOrder", response.message.tool_calls[0].id);
+      console.log("response2", response2);  
       process.stdout.write(response2.toString());
     }
   }
