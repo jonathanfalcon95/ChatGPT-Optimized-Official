@@ -399,13 +399,31 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
     }
 
     private countTokens(messages: Message[]): number {
-        let tokens: number = 0;
-        for (let i = 0; i < messages.length; i++) {
-            let message = messages[i];
-            tokens += encode(message.content).length;
-        }
-        return tokens;
-    }
+		let tokens: number = 0;
+		for (let message of messages) {
+			if (message.content) {
+				if (typeof message.content === "string") {
+					tokens += encode(message.content).length;
+				} else if (Array.isArray(message.content)) {
+					for (let contentBlock of message.content) {
+						if (contentBlock.type === "text") {
+							tokens += encode(contentBlock.text).length;
+						} else if (contentBlock.type === "image_url") {
+							// Estimar tokens para imágenes
+							if (contentBlock.image_url.detail === "low" || !contentBlock.image_url.detail) {
+								tokens += 85;
+							} else if (contentBlock.image_url.detail === "high") {
+								tokens += 765; // Ajusta según el tamaño real de la imagen si es posible
+							} else {
+								tokens += 85; // Estimación por defecto
+							}
+						}
+					}
+				}
+			}
+		}
+		return tokens;
+	}
 
     private getToday() {
         let today = new Date();

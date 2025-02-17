@@ -15,6 +15,7 @@ interface ChatGPTOptions {
 	name_assistant?: string;
 	tools?: [];
 	tool_choice?: string;
+	parallel_tool_calls?: boolean;
 } 
 
 export default ChatGPTOptions;

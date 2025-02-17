@@ -5,12 +5,22 @@ import Usage from "../models/chatgpt-usage.js";
 import Options from "../models/chatgpt-options.js";
 import Conversation from "../models/conversation.js";
 import Message from "../models/chatgpt-message.js";
+
 import MessageType from "../enums/message-type.js";
 import AppDbContext from "./app-dbcontext.js";
 import OpenAIKey from "../models/openai-key.js";
 //import { Configuration, OpenAIApi } from "openai";
 import { type } from "os";
-
+type ContentBlock = {
+    type: "text",
+    text: string
+} | {
+    type: "image_url",
+    image_url: {
+        url: string,
+        detail?: "low" | "high" | "auto"
+    }
+};
 class ChatGPT {
 	public options: Options;
 	private db: AppDbContext;
@@ -55,6 +65,7 @@ class ChatGPT {
 			function_call: options?.function_call || null,
 			tools: options?.tools || null,
 			tool_choice: options?.tool_choice || 'auto',
+			parallel_tool_calls: options?.parallel_tool_calls || false,
 		};
 	}
 
@@ -258,10 +269,17 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			}
 		}
 	}
-	public async askV1(prompt: string, conversationId: string = "default", type: number = 1, function_name?: string, tool_call_id?: string, userName: string = "User") {
+	public async askV1(
+		prompt: string | ContentBlock[],
+		conversationId: string = "default",
+		type: number = 1,
+		function_name?: string,
+		tool_call_id?: string,
+		userName: string = "User"
+	) {
 		return await this.askPost(
-			(data) => { },
-			(data) => { },
+			(data) => {},
+			(data) => {},
 			prompt,
 			conversationId,
 			function_name,
@@ -270,7 +288,14 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 			tool_call_id
 		);
 	}
-	public async askPost(data: (arg0: string) => void, usage: (usage: Usage) => void, prompt: string, conversationId: string = "default", function_name?: string, userName: string = "User", type: number = MessageType.User, tool_call_id?: string) {
+	public async askPost(data: (arg0: string) => void,
+    usage: (usage: Usage) => void,
+    prompt: string | ContentBlock[],
+    conversationId: string = "default",
+    function_name?: string,
+    userName: string = "User",
+    type: number = MessageType.User,
+    tool_call_id?: string) {
 		let oAIKey = this.getOpenAIKey();
 		let conversation = this.getConversation(conversationId, userName);
 		// if (this.options.moderation) {
@@ -279,7 +304,7 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 		// 		return { message: "Your message was flagged as inappropriate and was not sent." };
 		// 	}
 		// }
-
+		//  console.log("funciones paraleas")
 		let promptStr = this.generatePrompt(conversation, prompt, type, function_name, tool_call_id);
 		//console.log(promptStr)
 
@@ -295,7 +320,9 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 				presence_penalty: this.options.presence_penalty,
 				stream: false, // Note this
 				tools: this.options.tools,
-				tool_choice: this.options.tool_choice
+				tool_choice: this.options.tool_choice,
+				parallel_tool_calls: this.options.parallel_tool_calls,
+
 			}
 			if (this.options.functions) {
 				auxOptions["functions"] = this.options.functions;
@@ -341,18 +368,18 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 				});
 			}
 			else
-			if (response.data.choices[0]['message']['content']) {
-				//console.log("response.data.choices[0]['message']['content']", response.data.choices[0]['message']['content'])
-				conversation.messages.push({
-					id: randomUUID(),
-					content: response.data.choices[0]['message']['content'] ? response.data.choices[0]['message']['content'] : "",
-					type: MessageType.Assistant,
-					date: Date.now(),
+				if (response.data.choices[0]['message']['content']) {
+					//console.log("response.data.choices[0]['message']['content']", response.data.choices[0]['message']['content'])
+					conversation.messages.push({
+						id: randomUUID(),
+						content: response.data.choices[0]['message']['content'] ? response.data.choices[0]['message']['content'] : "",
+						type: MessageType.Assistant,
+						date: Date.now(),
 
-				});
+					});
 
 
-			}
+				}
 			data(JSON.stringify(response.data.choices[0]))
 			return response.data.choices[0]; // return the full response
 		} catch (error: any) {
@@ -377,7 +404,11 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 	}
 
 	// Función para generar el prompt basado en la conversación y el mensaje actual
-	private generatePrompt(conversation: Conversation, prompt: string, type: number = MessageType.User, function_name?: string, tool_call_id?: string): Message[] {
+	private generatePrompt(conversation: Conversation,
+		prompt: string | ContentBlock[],
+		type: number = MessageType.User,
+		function_name?: string,
+		tool_call_id?: string): Message[] {
 		// Crear un nuevo mensaje basado en el prompt y el tipo de mensaje
 		let message = {
 			id: randomUUID(),
@@ -421,40 +452,33 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 	// Función para generar los mensajes de la conversación
 	private generateMessages(conversation: Conversation): Message[] {
 		let messages: Message[] = [];
-
-		// Agregar el mensaje del sistema con las instrucciones
+	
 		messages.push({
 			role: "system",
 			content: this.getInstructions(conversation.userName),
 		});
-
-		// Iterar sobre los mensajes de la conversación
-		for (let i = 0; i < conversation.messages.length; i++) {
-			let message = conversation.messages[i];
-
-			// Si el mensaje es de tipo Function, agregar los detalles de la función
+	
+		for (let message of conversation.messages) {
 			if (message.type === MessageType.Function) {
 				messages.push({
 					tool_call_id: message.tool_call_id,
 					role: "tool",
-					name: message.name || "unknownFunction", // Usar "unknownFunction" si no se proporciona un nombre de función
+					name: message.name || "unknownFunction",
 					content: message.content,
 				});
-			} else if (message.type === MessageType.User) { // Si el mensaje es de tipo User
+			} else if (message.type === MessageType.User) {
 				messages.push({
 					role: "user",
 					content: message.content,
 				});
-			} else { // Para otros tipos de mensajes (por ejemplo, Assistant)
-
+			} else {
 				if (message.tool_calls) {
 					messages.push({
 						role: "assistant",
 						content: message.content,
 						tool_calls: message.tool_calls,
 					});
-				}
-				else {
+				} else {
 					messages.push({
 						role: "assistant",
 						content: message.content,
@@ -462,19 +486,38 @@ Current time: ${this.getTime()}${username !== "User" ? `\nName of the user talki
 				}
 			}
 		}
-
-		return messages; // Devolver los mensajes generados
+	
+		return messages;
 	}
-
+	
 
 	private countTokens(messages: Message[]): number {
 		let tokens: number = 0;
-		for (let i = 0; i < messages.length; i++) {
-			let message = messages[i];
-			tokens += encode(message.content).length;
+		for (let message of messages) {
+			if (message.content) {
+				if (typeof message.content === "string") {
+					tokens += encode(message.content).length;
+				} else if (Array.isArray(message.content)) {
+					for (let contentBlock of message.content) {
+						if (contentBlock.type === "text") {
+							tokens += encode(contentBlock.text).length;
+						} else if (contentBlock.type === "image_url") {
+							// Estimar tokens para imágenes
+							if (contentBlock.image_url.detail === "low" || !contentBlock.image_url.detail) {
+								tokens += 85;
+							} else if (contentBlock.image_url.detail === "high") {
+								tokens += 765; // Ajusta según el tamaño real de la imagen si es posible
+							} else {
+								tokens += 85; // Estimación por defecto
+							}
+						}
+					}
+				}
+			}
 		}
 		return tokens;
 	}
+	
 
 	private getToday() {
 		let today = new Date();
